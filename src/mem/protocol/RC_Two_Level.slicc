@@ -1,0 +1,7 @@
+protocol "RC_Two_Level";
+include "RubySlicc_interfaces.slicc";
+include "RC_Two_Level-msg.sm";
+include "RC_Two_Level-L1cache.sm";
+include "RC_Two_Level-L2cache.sm";
+include "RC_Two_Level-dir.sm";
+include "RC_Two_Level-dma.sm";

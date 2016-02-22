@@ -1,0 +1,48 @@
+/*
+ * Copyright stuff...
+ */
+
+
+//CoherenceRequestType from L2->L1
+enumeration(CoherenceRequestType, desc="...") {
+  INV,  desc="Invalidation";
+  PUTM, desc="Put Modified";
+  PUTS, desc="Put Shared";
+  WB_ACK, desc="Writeback ack";
+}
+
+//CoherenceResponseType from L1->L2
+enumeration(CoherenceResponseType, desc="...") {
+  MEMORY_ACK,       desc="Ack from memory controller";
+  DATA,             desc="Data";
+  UNBLOCK,          desc="Unblock";
+  WB_ACK,           desc="Writeback ack";
+  WRITEBACK_CLEAN,  desc="Clean writeback (no data)";
+  WRITEBACK_DIRTY,  desc="Dirty writeback (contains data)";
+  WRITEBACK,        desc="Generic writeback (contains data)";
+  DATA_FROM_DIR,    desc="Data from Directory";
+}
+
+// TriggerType
+
+// RequestMsg
+structure(RequestMsg, desc="...", interface="Message") {
+  Addr addr,                    desc="Physical address for this request";
+  CoherenceRequestType Type,    desc="Type of request";
+  RubyAccessMode AccessMode,    desc="user/supervisor access type";
+  MachineID Requestor      ,    desc="What component request";
+  NetDest Destination,          desc="What components receive the request, includes MachineType and num";
+  MessageSizeType MessageSize,  desc="size category of the message";
+  DataBlock DataBlk,            desc="Data for the cache line (if PUTS)";
+  int Len;
+  bool Dirty, default="false",  desc="Dirty bit";
+  PrefetchBit Prefetch,         desc="Is this a prefetch request";
+  
+  bool functionalRead(Packet *pkt) {
+    // Only PUTX messages contains the data block
+
+  }
+
+
+}
+
