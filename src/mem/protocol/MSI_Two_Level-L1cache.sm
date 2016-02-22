@@ -2,8 +2,9 @@
 machine(L1Cache, "MSI L1 Cache")
 : Sequencer * sequencer,
   CacheMemory * cacheMemory, //ECE552: Unified L1 Instruction and Data Cache
-  int cache_response_latency = 12,
-  int issue_latency = 2,
+  int l1_response_latency = 12,
+  int l1_request_latency = 2,
+  int to_l2_latency := 1,
   bool send_evictions = true
 {
 
@@ -12,11 +13,17 @@ machine(L1Cache, "MSI L1 Cache")
   //=============================================================
   // To the Network
   // ==============
-  //ECE552: <requestFromCache>: The local cache coherence controller gets requests from the L1 cache (e.g., on a miss) that it will propagate to the network via virtual network 2.
-  //ECE552: <responseFromCache>: The local cache coherence controller also propagates responses from its local cache to the network (e.g., a response to a forwarded GetS request from the directory)
 
-  MessageBuffer requestFromCache, network="To", virtual_network="2", ordered="true", vnet_type="request";
-  MessageBuffer responseFromCache, network="To", virtual_network="4", ordered="true", vnet_type="response";
+
+  // a local L1 -> this L2 bank, currently ordered with directory forwarded requests
+  MessageBuffer requestFromL1Cache, network="To", virtual_network="0", ordered="true", vnet_type="request";
+  MessageBuffer responseFromL1Cache, network="To", virtual_network="1", ordered="true", vnet_type="response";
+  MessageBuffer unblockFromL1Cache, network="To", virtual_network="2", ordered="true", vnet_type="unblock";
+
+  // To this node's L1 cache FROM the network
+  // a L2 bank -> this L1
+  MessageBuffer requestToL1Cache, network="From", virtual_network="2", ordered="true", vnet_type="request";
+  MessageBuffer responseToL1Cache, network="From", virtual_network="1", ordered="true", vnet_type="response";
 
   //=============================================================
   // From the Network
@@ -242,8 +249,8 @@ machine(L1Cache, "MSI L1 Cache")
 
 
   //ECE552: Two output port that place messages onto the network (i.e., requests and reponses)
-  out_port(requestNetwork_out, RequestMsg, requestFromCache);
-  out_port(responseNetwork_out, ResponseMsg, responseFromCache);
+  out_port(requestNetwork_out, RequestMsg, requestFromL1Cache);
+  out_port(responseNetwork_out, ResponseMsg, responseFromL1Cache);
  
   //ECE552: Process incoming request messages from the forwardToCache Network buffer. Trigger appropriate events based on the incoming CoherenceRequestType.
   //ECE552: All CoherenceRequestType declarations are provided in MSI-msg.sm
@@ -360,7 +367,7 @@ machine(L1Cache, "MSI L1 Cache")
   */
 
   action(as_issueGetS, "as", desc="Issue a request for read-only access") {
-    enqueue(requestNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(requestNetwork_out, RequestMsg, latency=l1_request_latency) {
       out_msg.Address := address;
       out_msg.Type := CoherenceRequestType:GETS;
       out_msg.Requestor := machineID;
@@ -370,7 +377,7 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
   action(am_issueGetM, "am", desc="Issue a request for read-write access") {
-    enqueue(requestNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(requestNetwork_out, RequestMsg, latency=l1_request_latency) {
       out_msg.Address := address;
       out_msg.Type := CoherenceRequestType:GETM;
       out_msg.Requestor := machineID;
@@ -382,7 +389,7 @@ machine(L1Cache, "MSI L1 Cache")
   /* ECE552: Issue PUTS/PUTM requests, on local replacements to the directory */
 
   action(bs_issuePUTS, "bs", desc="Issue a PUTS request") {
-    enqueue(requestNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(requestNetwork_out, RequestMsg, latency=l1_request_latency) {
       assert(is_valid(cache_entry));
       out_msg.Address := address;
       out_msg.Type := CoherenceRequestType:PUTS;
@@ -396,7 +403,7 @@ machine(L1Cache, "MSI L1 Cache")
 
   
   action(bm_issuePUTM, "bm", desc="Issue a PUTM request") {
-    enqueue(requestNetwork_out, RequestMsg, latency=issue_latency) {
+    enqueue(requestNetwork_out, RequestMsg, latency=l1_request_latency) {
       assert(is_valid(cache_entry));
       out_msg.Address := address;
       out_msg.Type := CoherenceRequestType:PUTM;
@@ -410,7 +417,7 @@ machine(L1Cache, "MSI L1 Cache")
 
   action(e_sendDataFromCacheToRequestor, "e", desc="Send data from cache to requestor") {
     peek(forwardRequestNetwork_in, RequestMsg) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=cache_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, latency=l1_response_latency) {
         assert(is_valid(cache_entry));
         out_msg.Address := address;
         out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
@@ -424,7 +431,7 @@ machine(L1Cache, "MSI L1 Cache")
 
   action(ee_sendDataFromTBEToRequestor, "\e", desc="Send data from TBE to requestor") {
     peek(forwardRequestNetwork_in, RequestMsg) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=cache_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, latency=l1_response_latency) {
         assert(is_valid(tbe));
         out_msg.Address := address;
         out_msg.Type := CoherenceResponseType:DATA_FROM_OWNER;
@@ -437,7 +444,7 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
   action(de_sendDataFromCacheToDir, "de", desc="Send data from cache to directory") { 
-     enqueue(responseNetwork_out, ResponseMsg, latency=cache_response_latency) { 
+     enqueue(responseNetwork_out, ResponseMsg, latency=l1_response_latency) { 
         assert(is_valid(cache_entry));
         out_msg.Address := address;
         out_msg.Type := CoherenceResponseType:DATA;
@@ -449,7 +456,7 @@ machine(L1Cache, "MSI L1 Cache")
   }
 
   action(dee_sendDataFromTBEToDir, "d\e", desc="Send data from TBE to directory") {
-     enqueue(responseNetwork_out, ResponseMsg, latency=cache_response_latency) {
+     enqueue(responseNetwork_out, ResponseMsg, latency=l1_response_latency) {
         assert(is_valid(tbe));
         out_msg.Address := address;
         out_msg.Type := CoherenceResponseType:DATA;
@@ -462,7 +469,7 @@ machine(L1Cache, "MSI L1 Cache")
 
   action(fi_sendInvAck, "fi", desc="send Invalidation Acknowledgement to Requestor") {
     peek(forwardRequestNetwork_in, RequestMsg) {
-      enqueue(responseNetwork_out, ResponseMsg, latency=cache_response_latency) {
+      enqueue(responseNetwork_out, ResponseMsg, latency=l1_response_latency) {
         out_msg.Address := address;
         out_msg.Type := CoherenceResponseType:ACK;
         out_msg.Sender := machineID;
