@@ -1,6 +1,5 @@
-protocol "MSI_Two_Level";
+protocol "MSI";
 include "RubySlicc_interfaces.slicc";
-include "MSI_Two_Level-msg.sm";
-include "MSI_Two_Level-L1cache.sm";
-include "MSI_Two_Level-L2cache.sm";
-include "MSI_Two_Level-dir.sm";
+include "MSI-msg.sm";
+include "MSI-cache.sm";
+include "MSI-dir.sm";

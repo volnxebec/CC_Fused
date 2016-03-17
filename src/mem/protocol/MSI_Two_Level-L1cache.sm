@@ -31,8 +31,8 @@ machine(L1Cache, "MSI L1 Cache")
   //ECE552:  <forwardToCache>: The local cache coherence controller receives forwarded requests from the directory.
   //ECE552:  <responseToCache>: The local cache coherence controller also receives replies from the Network for requests it issues via virtual network 2.
 
-  MessageBuffer forwardToCache, network="From", virtual_network="3", ordered="true", vnet_type="forward";
-  MessageBuffer responseToCache, network="From", virtual_network="4", ordered="true", vnet_type="response";
+  //MessageBuffer forwardToCache, network="From", virtual_network="3", ordered="true", vnet_type="forward";
+  //MessageBuffer responseToCache, network="From", virtual_network="4", ordered="true", vnet_type="response";
 
   //=============================================================
   // STATES

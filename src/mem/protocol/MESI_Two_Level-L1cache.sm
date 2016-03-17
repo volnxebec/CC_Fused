@@ -1,0 +1,231 @@
+/*
+  Author: Bill
+ */
+
+machine(L1Cache, "MESI Directory L1 Cache CMP")
+  : Sequencer * sequencer,
+    CacheMemory * L1Icache,
+    CacheMemory * L1Dcache,
+    int l2_select_num_bits,
+    int l1_request_latency = 2,
+    int l1_response_latency = 2,
+    int to_l2_latency = 1,
+    bool send_evictions
+{
+
+  // Message Queues
+  // From this node's L1 cache TO the network
+
+  // a local L1 -> this L2 bank, currently ordered with directory forwarded requests
+  MessageBuffer requestFromL1Cache, network="To", virtual_network="0", ordered="true", vnet_type="request";
+  MessageBuffer responseFromL1Cache, network="To". virtual_network="1", ordered="true", vnet_type="response";
+  MessageBuffer unblockFromL1Cache, network="To", virtual_network="2", ordered="true", vnet_type="unblock";
+
+  MessageBuffer requestToL1Cache, network="From", virtual_network="2", ordered="true", vnet_type="request";
+  MessageBuffer responseToL1Cache, network="From", virtual_network="1", ordered="true", vnet_type="response";
+
+  MessageBuffer mandatoryQueuei, ordered="false";
+
+  state_declaration(State, desc="Cache states", default="L1Cache_State_I") {
+
+    NP, AccessPermission:Invalid, desc="Not present in either cache";
+    I, AccessPermission:Invalid, desc="a L1 cache entry Idle";
+    S, AccessPermission:Read_Only, desc="a L1 cache entry Shared";
+    E, AccessPermission:Read_Only, desc="a L1 cache entry Exclusive";
+    M, AccessPermission:Read_Write, desc="a L1 cache entry Modified", format="!b";
+
+    IS, AccessPermission:Busy, desc="L1 idle, issued GETS, have not seen response yet";
+    IM, AccessPermission:Busy, desc="L1 idle, issued GETX, have not seen response yet";
+    SM, AccessPermission:Read_Only, desc="L1 idle, issued GETX, have not seen response yet";
+    IS_I, AccessPermission:Busy, desc="L1 idle, issued GETS, saw Inv before data because directory doesn't block on GETS hit";
+
+    M_I, AccessPermission:Busy, desc="L1 replacing, waiting for ACK";
+    SINK_WB_ACK, AccessPermission:Busy, desc="This is to sink WB_Acks from L2";
+
+    PF_IS, AccessPermission:Busy, desc="Issued GETS, have not seen response yet";
+    PF_IM, AccessPermission:Busy, desc="Issued GETX, have not seen response yet";
+    PF_SM, AccessPermission:Busy, desc="Issued GETX, received data, waiting for acks";
+    PF_IS_I, AccessPermission:Busy, desc="Issued GETs, saw inv before data";
+  }
+
+  enumeration(Event, desc="Cache events") {
+    Load,            desc="Load request from the home processor";
+    Ifetch,          desc="I-fetch request from the home processor";
+    Store,           desc="Store request from the home processor";
+
+    Inv,           desc="Invalidate request from L2 bank";
+
+    L1_Replacement,  desc="L1 Replacement", format="!r";
+
+    Fwd_GETX,   desc="GETX from other processor";
+    Fwd_GETS,   desc="GETS from other processor";
+    Fwd_GET_INSTR,   desc="GET_INSTR from other processor";
+
+    Data,       desc="Data for processor";
+    Data_Exclusive,       desc="Data for processor";
+    DataS_fromL1,       desc="data for GETS request, need to unblock directory";
+    Data_all_Acks,       desc="Data for processor, all acks";
+
+    Ack,        desc="Ack for processor";
+    Ack_all,      desc="Last ack for processor";
+
+    WB_Ack,        desc="Ack for replacement";
+  }
+
+  // CacheEntry
+  structure(Entry, desc="...", interface="AbstractCacheEntry") {
+    State CacheState,     desc="cache state";
+    DataBlock DataBlk,    desc="data for the block";
+    bool Dirty, default="false",  desc="data is dirty";
+  }
+
+  // TBE fields
+  structure(TBE, desc="...") {
+    Address addr,       desc="Physical address for this TBE";
+    State TBEState,        desc="Transient state";
+    DataBlock DataBlk,                desc="Buffer for the data block";
+    bool Dirty, default="false",   desc="data is dirty";
+    int pendingAcks, default="0", desc="number of pending acks";
+  }
+
+  structure(TBETable, external="yes") {
+    TBE lookup(Address);
+    void allocate(Address);
+    void deallocate(Address);
+    bool isPresent(Address);
+  }
+
+  TBETable TBEs, template="<L1Cache_TBE>", constructor="m_number_of_TBEs";
+
+  int l2_select_low_bit, default="RubySystem::getBlockSizeBits()";
+
+  //Tick clockEdge();
+  //int ticksToCycles(Tick t);
+  void set_cache_entry(AbstractCacheEntry a);
+  void unset_cache_entry();
+  void set_tbe(TBE a);
+  void unset_tbe();
+  void wakeUpBuffers(Address a); 
+
+  // inclusive cache returns L1 entries only
+  Entry getCacheEntry(Address addr), return_by_pointer="yes" {
+    Entry L1Dcache_entry := static_cast(Entry, "pointer", L1Dcache[addr]);
+    if(is_valid(L1Dcache_entry)) {
+      return L1Dcache_entry;
+    }
+
+    Entry L1Icache_entry := static_cast(Entry, "pointer", L1Icache[addr]);
+    return L1Icache_entry;
+  }
+  
+  Entry getL1DCacheEntry(Address addr), return_by_pointer="yes" {
+    Entry L1Dcache_entry := static_cast(Entry, "pointer", L1Dcache[addr]);
+    return L1Dcache_entry;
+  }
+
+  Entry getL1ICacheEntry(Address addr), return_by_pointer="yes" {
+    Entry L1Icache_entry := static_cast(Entry, "pointer", L1Icache[addr]);
+    return L1Icache_entry;
+  }
+
+  State getState(TBE tbe, Entry cache_entry, Address addr) {
+    assert((L1Dcache.isTagPresent(addr) && L1Icache.isTagPresent(addr)) == false);
+    if(is_valid(tbe)) {
+      return tbe.TBEState;
+    } else if (is_valid(cache_entry)) {
+      return cache_entry.CacheState;
+    }
+    return State:NP;
+  }
+
+  void setState(TBE tbe, Entry cache_entry, Address addr, State state) {
+    assert((L1Dcache.isTagPresent(addr) && L1Icache.isTagPresent(addr)) == false);
+
+    // MUST CHANGE
+    if(is_valid(tbe)) {
+      tbe.TBEState := state;
+    }
+    if (is_valid(cache_entry)) {
+      cache_entry.CacheState := state;
+    }
+  }
+
+  AccessPermission getAccessPermission(Address addr) {
+    TBE tbe := TBEs[addr];
+    if(is_valid(tbe)) {
+      DPRINTF(RubySlicc, "%s\n", L1Cache_State_to_permission(tbe.TBEState));
+      return L1Cache_State_to_permission(tbe.TBEState);
+    }
+
+    Entry cache_entry := getCacheEntry(addr);
+    if(is_valid(cache_entry)) {
+      DPRINTF(RubySlicc, "%s\n", L1Cache_State_to_permission(cache_entry.CacheState));
+      return L1Cache_State_to_permission(cache_entry.CacheState);
+    }
+
+    DPRINTF(RubySlicc, "%s\n", AccessPermission:NotPresent);
+    return AccessPermission:NotPresent;
+  }
+
+  //Space holder for functionalRead and functionalWrite
+
+  void setAccessPermission(Entry cache_entry, Address addr, State state) {
+    if (is_valid(cache_entry)) {
+      cache_entry.changePermission(L1Cache_State_to_permission(state));
+    }
+  }
+
+  Event mandatory_request_type_to_event(RubyRequestType type) {
+    if (type == RubyRequestType:LD) {
+      return Event:Load;
+    } else if (type == RubyRequestType:IFETCH) {
+      return Event:Ifetch;
+    } else if ((type == RubyRequestType:ST) || (type == RubyRequestType:ATOMIC)) {
+      return Event:Store;
+    } else {
+      error("Invalid RubyRequestType");
+    }
+  }
+
+  int getPendingAcks(TBE tbe) {
+    return tbe.pendingAcks;
+  }
+  
+  out_port(requestL1Network_out, RequestMsg, requestFromL1Cache);
+  out_port(responseL1Network_out, ResponseMsg, responseFromL1Cache);
+  out_port(unblockNetwork_out, ResponseMsg, unblockFromL1Cache);
+
+
+
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

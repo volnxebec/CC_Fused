@@ -34,9 +34,6 @@ Import('*')
 
 all_protocols = [
     'MSI',
-    'MSI_Two_Level',
-    'RC_MSI',
-    'RC_Two_Level',
     'None'
     ]
 

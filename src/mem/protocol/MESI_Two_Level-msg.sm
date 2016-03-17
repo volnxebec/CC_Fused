@@ -1,0 +1,64 @@
+/*
+Author: Bill
+*/
+
+// CoherenceRequestType
+enumeration(CoherenceRequestType, desc="...") {
+  GETX,       desc="Get Exclusive";
+  UPGRADE,    desc="UPGRADE to exclusive";
+  GETS,       desc="Get Shared";
+  GET_INSTR,  desc="Get Instruction";
+  INV,        desc="INValidate";
+  PUTX,       desc="Replacement message";
+
+  WB_ACK,     desc="Writeback ack";
+
+  DMA_READ,   desc="DMA Read";
+  DMA_WRITE,  desc="DMA Write";
+}
+
+// CoherenceResponseType
+enumeration(CoherenceResponseType, desc="...") {
+  MEMORY_ACK,     desc="Ack from memory controller";
+  DATA,           desc="Data block for L1 cache in S state";      
+  DATA_EXCLUSIVE, desc="Data block for L1 cache in M/E state";
+  MEMORY_DATA,    desc="Data block from / to main memory";
+  ACK,            desc="Generic invalidate ack";
+  WB_ACK,         desc="Writeback ack";
+  UNBLOCK,        desc="Unblock";
+  EXCLUSIVE_UNBLOCK,  desc="Exclusive unblock";
+  INV,            desc="Invalidate from directory";
+}
+
+// RequestMsg
+structure(RequestMsg, desc="...", interface="Message") {
+  Address addr,           desc="Physical address for this request";
+  CoherenceRequestType Type,  desc="Type of request (GetS, GetX, PutX, etc)";
+  RubyAccessMode AccessMode,  desc="user/supervisor access type";
+  MachineID Requestor,        desc="What component request";
+  NetDest Destination,        desc="What components receive the request, includes MachineType and num";
+  MessageSizeType MessageSize,  desc="Size category of the message";
+  DataBlock DataBlk,          desc="Data for the cache line (if PUTX)";
+  int Len;
+  bool Dirty, default="false", desc="Dirty bit";
+
+  //bool functionalRead(Packet *pkt) {
+    // Only PUTX messages contains the data block
+  //  if (Type == CoherenceRequestType:PUTX) {
+  //    return testAndRead(addr, DataBlk, pkt);
+  //  }
+  //  return false;
+  //}
+}
+
+// ResponseMsg
+structure(ResponseMsg, desc="...", interface="Message") {
+  Address addr,         desc="Physical address for this request";
+  CoherenceResponseType Type, desc="Type of response (Ack, Data, etc)";
+  MachineID Sender,     desc="What component sent the data";
+  NetDest Destination,  desc="Node to whom the data is sent";
+  DataBlock DataBlk,    desc="Data for the cache line";
+  bool Dirty, default="false",  desc="Dirty bit";
+  int AckCount, default="0",  desc="Number of acks in this message";
+  MessageSizeType MessageSize,  desc="Size category of the message";
+}
